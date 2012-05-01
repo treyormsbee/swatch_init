@@ -1,0 +1,225 @@
+#! /bin/sh
+#
+# Swatch This shell script takes care of starting and stopping
+# swatch.
+#
+# chkconfig: - 90 35
+# description: The Simple WATCHer is an automated monitoring tool \
+# that is capable of alerting system administrators \
+# of anything that matches the patterns described \
+# in the configuration file, whilst constantly searching \
+# logfiles using perl.
+#
+# processname: swatch
+# config: /etc/swatchrc
+
+if [ -f /etc/sysconfig/swatch ]
+then
+  . /etc/sysconfig/swatch
+fi
+
+CHECK_LOG="${CHECK_LOG:-/var/log/secure}"
+SWATCH_CONF="${SWATCH_CONF:-/etc/swatch.conf}"
+SWATCH_PID_FILE="${SWATCH_PID_FILE:-/var/run/swatch.pid}"
+SWATCH_LOG="/var/log/swatch"
+SWATCH_BIN="/usr/bin/swatch"
+SWATCH_SCRIPTDIR="/var/run"
+
+# Source function library.
+if [ -f /etc/init.d/functions ] ; then
+  . /etc/init.d/functions
+elif [ -f /etc/rc.d/init.d/functions ] ; then
+  . /etc/rc.d/init.d/functions
+else
+  exit 0
+fi
+
+# Check that swatch exists.
+if [ ! -x ${SWATCH_BIN} ]; then
+  echo "Swatch, ${SWATCH_BIN} not installed!"
+  exit 3
+fi
+
+#Let's verify if we will be running multiple instances of swatch
+MULTI="NO"
+CHECK_LOG_NUM=${#CHECK_LOG[@]}
+SWATCH_CONF_NUM=${#SWATCH_CONF[@]}
+SWATCH_PID_FILE_NUM=${#SWATCH_PID_FILE[@]}
+
+#The above values should all match,  let's verify that first.\
+if [ $CHECK_LOG_NUM -eq $SWATCH_CONF_NUM -a $SWATCH_CONF_NUM -eq $SWATCH_PID_FILE_NUM -a $SWATCH_PID_FILE_NUM -eq $CHECK_LOG_NUM ]
+then
+  #We are good here,  
+  #if the value of any of the above is greater then one... then we are launching multiple instances of swatch.
+  if [ $SWATCH_CONF_NUM -gt 1 ]
+  then
+    #Multiple instances will need to be launched.
+    MULTI="YES"
+    INSTANCES=$(expr $SWATCH_CONF_NUM - 1)
+  fi
+else
+  #Error out,  these numbers should all match.
+  echo "The elements in CHECK_LOG, SWATCH_CONF and SWATCH_PID do not match."
+  exit 1
+fi
+
+# Check that swatch configuration file exists.
+for config_file in ${SWATCH_CONF[@]}
+do
+  if [ ! -f $config_file ]
+  then
+    echo "Swatch configuration file, ${config_file} does not exist."
+    exit 3
+  fi
+done
+
+prog=swatch
+RETVAL=0
+
+pid_check() {
+  #SWATCH_PID=`pidof swatch`
+  SWATCH_PID=$(cat ${SWATCH_PID_FILE:-DOESNOTEXIST} 2>/dev/null)
+  if ! ps $SWATCH_PID >/dev/null 2>&1
+  then
+    SWATCH_PID=""
+  fi
+}
+
+pid_check_multi() {
+  arrelem=0
+  while [ $arrelem -le $INSTANCES ]
+  do
+    SWATCH_PID[$arrelem]=$(cat ${SWATCH_PID_FILE[$arrelem]:-DOESNOTEXIST} 2>/dev/null)
+    if ! ps ${SWATCH_PID[$arrelem]} >/dev/null 2>&1
+    then
+      SWATCH_PID[$arrelem]=""
+    fi
+    let arrelem++
+  done
+}
+
+start() {
+  if [ $MULTI = "NO" ]
+  then
+    pid_check
+    if [ "$SWATCH_PID" != "" ]; then
+      echo "Swatch System already running!"
+    else
+      echo -n $"Starting $prog: "
+      `$SWATCH_BIN --daemon -c $SWATCH_CONF -t $CHECK_LOG --pid-file=$SWATCH_PID_FILE --script-dir=$SWATCH_SCRIPTDIR >> \
+       $SWATCH_LOG &` && success || failure
+       RETVAL=$?
+      echo
+    fi
+    return $RETVAL
+  else
+    pid_check_multi
+    arrelem=0
+    while [ $arrelem -le $INSTANCES ]
+    do
+      if [ "${SWATCH_PID[$arrelem]}" != "" ]
+      then
+        echo "Swatch ${SWATCH_CONF[$arrelem]} is already running"
+      else
+        echo -n $"Starting $prog ${SWATCH_CONF[$arrelem]}: "
+        `$SWATCH_BIN --daemon \
+          -c ${SWATCH_CONF[$arrelem]} \
+          -t ${CHECK_LOG[$arrelem]} \
+          --pid-file=${SWATCH_PID_FILE[$arrelem]} \
+          --script-dir=$SWATCH_SCRIPTDIR >> \
+          $SWATCH_LOG &` && success || failure
+        RETVAL[$arrelem]=$?
+        echo
+      fi
+      let arrelem++
+    done
+  fi
+}
+
+stop() {
+  if [ $MULTI = "NO" ]
+  then
+    pid_check
+    if [ "${SWATCH_PID}" == "" ]; then
+      echo "Swatch System not running!"
+    else
+      local TAIL_PID
+      let TAIL_PID=SWATCH_PID+1
+      echo -n $"Stopping $prog: "
+      kill -9 $TAIL_PID && `rm -f $SWATCH_PID_FILE` && `rm -f $SWATCH_SCRIPTDIR/.swatch_script.*` && success || failure
+      RETVAL=$?
+      echo
+    fi
+    return $RETVAL
+  else
+    pid_check_multi
+    arrelem=0
+    while [ $arrelem -le $INSTANCES ]
+    do
+      if [ "${SWATCH_PID[$arrelem]}" == "" ]
+      then
+        echo "Swatch ${SWATCH_CONF[$arrelem]} is not running"
+      else
+        echo -n $"Stopping $prog ${SWATCH_CONF[$arrelem]}: "
+        kill -9 ${SWATCH_PID[$arrelem]} && `rm -f ${SWATCH_PID_FILE[$arrelem]}` && `rm -f $SWATCH_SCRIPTDIR/.swatch_script.*` && success || failure
+        RETVAL[$arrelem]=$?
+        echo
+      fi
+    let arrelem++
+    done
+  fi
+}
+
+# See how we were called.
+case "$1" in
+  start)
+    start
+  ;;
+  stop)
+    stop
+  ;;
+  status)
+    if [ $MULTI = "NO" ]
+    then
+      status $prog
+    else
+      pid_check_multi
+      arrelem=0
+      while [ $arrelem -le $INSTANCES ]
+      do
+        if [ "${SWATCH_PID[$arrelem]}" == "" ]
+        then
+          echo "swatch ${SWATCH_CONF[$arrelem]} is stopped"
+          RETVAL[$arrelem]=3
+        else
+          echo "swatch ${SWATCH_CONF[$arrelem]} (pid ${SWATCH_PID[$arrelem]}) is running..."
+          RETVAL[$arrelem]=0
+        fi
+      let arrelem++
+      done
+    fi
+  ;;
+  restart)
+    stop
+    start
+  ;;
+  *)
+    echo $"Usage: $0 {start|stop|status|restart}"
+    exit 1
+  ;;
+esac
+
+if [ $MULTI = "NO" ]
+then
+  exit $RETVAL
+else
+  max_retval=0
+  for val in ${RETVAL[@]}
+  do
+    if [ $val -gt $max_retval ]
+    then
+      max_retval=$val
+    fi
+  done
+  exit $max_retval
+fi

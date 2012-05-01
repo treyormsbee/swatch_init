@@ -1,0 +1,11 @@
+#This conf file is designed to run multiple swatch instances watching multiple different file.
+#The follwing demonstrates watching 1 file.
+CHECK_LOG="/var/log/secure"
+SWATCH_CONF="/etc/swatch.conf"
+SWATCH_PID_FILE="/var/run/swatch.pid"
+
+#The following is for watching multiple files,  ordering is important for each array
+#CHECK_LOG=("/var/log/secure" "/var/log/messages")
+#SWATCH_CONF=("/etc/swatch.secure.conf" "/etc/swatch.messages.conf")
+#SWATCH_PID_FILE=("/var/run/swatch.secure.pid" "/var/run/swatch.messages.pid")
+
