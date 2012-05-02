@@ -59,7 +59,7 @@ then
   fi
 else
   #Error out,  these numbers should all match.
-  echo "The elements in CHECK_LOG, SWATCH_CONF and SWATCH_PID do not match."
+  echo "The number of elements in CHECK_LOG, SWATCH_CONF and SWATCH_PID do not match."
   exit 1
 fi
 
