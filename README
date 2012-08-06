@@ -1,0 +1,3 @@
+This is a modified swatch init script for centos;  I found the original one online somewhere props to the original author but I don't know who that is.
+
+Updates include launching multiple instances of swatch for multiple files with multiple config files.
